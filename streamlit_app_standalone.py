@@ -38,8 +38,17 @@ import matplotlib
 matplotlib.use('Agg')
 import pygame
 
-# Initialize pygame for audio
-pygame.mixer.init()
+# Initialize pygame for audio (with fallback for headless environments)
+AUDIO_AVAILABLE = False
+try:
+    # Try to initialize with dummy driver for headless environments
+    os.environ['SDL_AUDIODRIVER'] = 'dummy'
+    pygame.mixer.init()
+    AUDIO_AVAILABLE = True
+    logger.info("Audio system initialized successfully")
+except Exception as e:
+    logger.warning(f"Audio system not available: {e}. Audio playback will be disabled.")
+    AUDIO_AVAILABLE = False
 
 # Page config
 st.set_page_config(
@@ -238,6 +247,10 @@ def animate_fade_in(graph_placeholder, G, pos, sentence_data,
 
 def play_audio(audio_file):
     """Play audio file using pygame"""
+    if not AUDIO_AVAILABLE:
+        logger.info("Audio playback skipped - no audio device available")
+        return False
+        
     try:
         if os.path.exists(audio_file):
             pygame.mixer.music.load(audio_file)
