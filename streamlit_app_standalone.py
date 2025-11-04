@@ -245,26 +245,42 @@ def animate_fade_in(graph_placeholder, G, pos, sentence_data,
             time.sleep(animation_duration / steps)
 
 
-def play_audio(audio_file):
-    """Play audio file using Streamlit's audio player (works in cloud!)"""
+def play_audio(audio_file, wait_for_audio=True):
+    """
+    Play audio file using Streamlit's audio player (works in cloud!)
+    
+    Args:
+        audio_file: Path to audio file
+        wait_for_audio: If True, wait for estimated audio duration before continuing
+    
+    Returns:
+        Audio duration in seconds (or True/False for legacy compatibility)
+    """
     try:
         if os.path.exists(audio_file):
             # Use Streamlit's native audio player - works in cloud!
             st.audio(audio_file, format='audio/mp3', start_time=0)
             
-            # Optional: Get audio duration for timing
+            # Get audio duration for timing
+            duration = 0
             try:
                 import mutagen
                 from mutagen.mp3 import MP3
                 audio = MP3(audio_file)
                 duration = audio.info.length
                 logger.info(f"Playing audio: {duration:.2f}s")
-                # Don't block - let user control playback
-                # time.sleep(duration)  # Uncomment if you want to wait
             except:
-                logger.info(f"Playing audio file: {audio_file}")
+                # Fallback: estimate duration from file size
+                file_size = os.path.getsize(audio_file)
+                # Rough estimate: ~1KB per 0.1 seconds for MP3
+                duration = max(2.0, file_size / 10000)
+                logger.info(f"Playing audio file: {audio_file} (estimated {duration:.1f}s)")
             
-            return True
+            # Wait for audio to "play" (give user time to hear it)
+            if wait_for_audio and duration > 0:
+                time.sleep(duration)
+            
+            return duration
     except Exception as e:
         logger.error(f"Error playing audio: {e}")
     
@@ -389,6 +405,12 @@ def run_dynamic_visualization(timeline, layout_style="hierarchical", show_edge_l
         progress_placeholder = st.empty()
         sentence_placeholder = st.empty()
         concepts_placeholder = st.empty()
+        
+        # Audio section
+        st.markdown("---")
+        st.markdown("#### 🔊 Audio Narration")
+        audio_placeholder = st.empty()
+        audio_info = st.empty()
     
     # Animation state
     visible_nodes = set()
@@ -424,7 +446,19 @@ def run_dynamic_visualization(timeline, layout_style="hierarchical", show_edge_l
         # Play audio if available
         audio_file = sentence_data.get('audio_file')
         if audio_file and os.path.exists(audio_file):
-            play_audio(audio_file)
+            with audio_placeholder.container():
+                st.audio(audio_file, format='audio/mp3')
+            with audio_info:
+                st.info("🎧 **Click ▶️ above to hear this sentence**")
+            
+            # Wait for audio duration so user has time to listen
+            try:
+                from mutagen.mp3 import MP3
+                audio = MP3(audio_file)
+                duration = audio.info.length
+                time.sleep(duration + 0.5)  # Add 0.5s pause between sentences
+            except:
+                time.sleep(3.0)  # Default pause
         else:
             # Fallback: estimate duration
             time.sleep(sentence_data.get('estimated_tts_duration', 2.0))
