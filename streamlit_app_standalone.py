@@ -246,19 +246,23 @@ def animate_fade_in(graph_placeholder, G, pos, sentence_data,
 
 
 def play_audio(audio_file):
-    """Play audio file using pygame"""
-    if not AUDIO_AVAILABLE:
-        logger.info("Audio playback skipped - no audio device available")
-        return False
-        
+    """Play audio file using Streamlit's audio player (works in cloud!)"""
     try:
         if os.path.exists(audio_file):
-            pygame.mixer.music.load(audio_file)
-            pygame.mixer.music.play()
+            # Use Streamlit's native audio player - works in cloud!
+            st.audio(audio_file, format='audio/mp3', start_time=0)
             
-            # Wait for audio to finish
-            while pygame.mixer.music.get_busy():
-                time.sleep(0.1)
+            # Optional: Get audio duration for timing
+            try:
+                import mutagen
+                from mutagen.mp3 import MP3
+                audio = MP3(audio_file)
+                duration = audio.info.length
+                logger.info(f"Playing audio: {duration:.2f}s")
+                # Don't block - let user control playback
+                # time.sleep(duration)  # Uncomment if you want to wait
+            except:
+                logger.info(f"Playing audio file: {audio_file}")
             
             return True
     except Exception as e:
