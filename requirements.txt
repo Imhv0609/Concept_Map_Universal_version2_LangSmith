@@ -11,4 +11,5 @@ streamlit>=1.28.0  # Web-based interactive visualization for dynamic concept map
 edge-tts>=7.2.0  # High-quality natural text-to-speech (Microsoft Azure voices)
 pygame>=2.5.0  # Audio playback for pre-generated TTS files (local only)
 mutagen>=1.47.0  # Optional: For getting audio file duration
+nest-asyncio>=1.5.0  # Allows nested async event loops (fixes Streamlit compatibility)
 dotenv

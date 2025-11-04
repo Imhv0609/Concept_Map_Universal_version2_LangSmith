@@ -50,8 +50,12 @@ class PrecomputeEngine:
         """
         import edge_tts
         
-        communicate = edge_tts.Communicate(text, self.voice, rate=self.rate)
-        await communicate.save(output_file)
+        try:
+            communicate = edge_tts.Communicate(text, self.voice, rate=self.rate)
+            await communicate.save(output_file)
+        except Exception as e:
+            # Re-raise with more context
+            raise Exception(f"Edge-TTS failed: {e}. Check internet connection and voice name '{self.voice}'")
     
     def generate_audio_file(self, text: str, index: int) -> str:
         """
@@ -67,12 +71,43 @@ class PrecomputeEngine:
         output_file = os.path.join(self.temp_dir, f"sentence_{index}.mp3")
         
         try:
-            # Run async function synchronously
-            asyncio.run(self._generate_audio_async(text, output_file))
-            logger.info(f"✅ Generated audio for sentence {index}: {os.path.basename(output_file)}")
-            return output_file
+            # Apply nest_asyncio to allow nested event loops (Streamlit compatibility)
+            try:
+                import nest_asyncio
+                nest_asyncio.apply()
+            except:
+                pass  # Already applied or not needed
+            
+            # Handle event loop properly for Streamlit compatibility
+            try:
+                # Try to get and use existing event loop
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Loop is already running (Streamlit context)
+                    # Use run_until_complete with nest_asyncio
+                    loop.run_until_complete(self._generate_audio_async(text, output_file))
+                else:
+                    # Loop exists but not running
+                    loop.run_until_complete(self._generate_audio_async(text, output_file))
+            except RuntimeError as e:
+                # No event loop exists, create new one
+                logger.debug(f"Creating new event loop: {e}")
+                asyncio.run(self._generate_audio_async(text, output_file))
+            
+            # Verify file was created
+            if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                file_size = os.path.getsize(output_file)
+                logger.info(f"✅ Generated audio for sentence {index}: {os.path.basename(output_file)} ({file_size} bytes)")
+                return output_file
+            else:
+                logger.error(f"❌ Audio file not created for sentence {index}")
+                return None
+                
         except Exception as e:
             logger.error(f"❌ Failed to generate audio for sentence {index}: {e}")
+            logger.error(f"   Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
             return None
     
     def generate_all_audio(self, timeline: Dict) -> Dict:
