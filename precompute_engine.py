@@ -57,9 +57,40 @@ class PrecomputeEngine:
             # Re-raise with more context
             raise Exception(f"Edge-TTS failed: {e}. Check internet connection and voice name '{self.voice}'")
     
+    def _generate_audio_gtts_fallback(self, text: str, output_file: str) -> bool:
+        """
+        Fallback: Generate audio using gTTS (Google Text-to-Speech).
+        More reliable on cloud platforms like Streamlit Cloud.
+        
+        Args:
+            text: Text to synthesize
+            output_file: Output MP3 file path
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            from gtts import gTTS
+            
+            # Create gTTS object
+            tts = gTTS(text=text, lang='en', slow=False)
+            
+            # Save to file
+            tts.save(output_file)
+            
+            # Verify file was created
+            if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                return True
+            return False
+            
+        except Exception as e:
+            logger.error(f"gTTS fallback also failed: {e}")
+            return False
+    
     def generate_audio_file(self, text: str, index: int) -> str:
         """
         Generate audio file for a sentence.
+        Uses Edge-TTS with gTTS fallback for better cloud compatibility.
         
         Args:
             text: Sentence text
@@ -70,6 +101,7 @@ class PrecomputeEngine:
         """
         output_file = os.path.join(self.temp_dir, f"sentence_{index}.mp3")
         
+        # Try Edge-TTS first
         try:
             # Apply nest_asyncio to allow nested event loops (Streamlit compatibility)
             try:
@@ -100,15 +132,24 @@ class PrecomputeEngine:
                 logger.info(f"✅ Generated audio for sentence {index}: {os.path.basename(output_file)} ({file_size} bytes)")
                 return output_file
             else:
-                logger.error(f"❌ Audio file not created for sentence {index}")
-                return None
+                logger.warning(f"⚠️ Edge-TTS didn't create file for sentence {index}, trying gTTS fallback...")
+                raise Exception("File not created")
                 
         except Exception as e:
-            logger.error(f"❌ Failed to generate audio for sentence {index}: {e}")
-            logger.error(f"   Exception type: {type(e).__name__}")
-            import traceback
-            logger.error(f"   Traceback: {traceback.format_exc()}")
-            return None
+            # Edge-TTS failed, try gTTS fallback
+            logger.warning(f"⚠️ Edge-TTS failed for sentence {index}, trying gTTS fallback...")
+            
+            try:
+                if self._generate_audio_gtts_fallback(text, output_file):
+                    file_size = os.path.getsize(output_file)
+                    logger.info(f"✅ Generated audio (gTTS) for sentence {index}: {os.path.basename(output_file)} ({file_size} bytes)")
+                    return output_file
+                else:
+                    logger.error(f"❌ Both Edge-TTS and gTTS failed for sentence {index}")
+                    return None
+            except Exception as e2:
+                logger.error(f"❌ gTTS fallback failed for sentence {index}: {e2}")
+                return None
     
     def generate_all_audio(self, timeline: Dict) -> Dict:
         """
