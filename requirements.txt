@@ -1,0 +1,13 @@
+google-generativeai>=0.3.0
+langgraph>=0.0.40
+langchain-core>=0.1.0
+langsmith>=0.1.0
+python-dotenv>=1.0.0
+typing-extensions>=4.5.0
+networkx>=3.0
+matplotlib>=3.7.0
+pyttsx3>=2.90  # Text-to-Speech for dynamic concept map narration (legacy)
+streamlit>=1.28.0  # Web-based interactive visualization for dynamic concept maps
+edge-tts>=7.2.0  # High-quality natural text-to-speech (Microsoft Azure voices)
+pygame>=2.5.0  # Audio playback for pre-generated TTS files
+dotenv
