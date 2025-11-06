@@ -153,49 +153,84 @@ class PrecomputeEngine:
     
     def generate_all_audio(self, timeline: Dict) -> Dict:
         """
-        Pre-generate all audio files for the timeline.
+        Pre-generate audio file for the continuous timeline.
         
         Args:
             timeline: Timeline dict from timeline_mapper
             
         Returns:
-            Updated timeline with audio_file paths
+            Updated timeline with audio_file path and actual duration
         """
-        logger.info("🎵 Pre-generating all audio files...")
+        logger.info("🎵 Pre-generating audio for continuous timeline...")
         
-        total_sentences = len(timeline["sentences"])
+        # Get full text from timeline
+        full_text = timeline.get("full_text", "")
         
-        for sentence_data in timeline["sentences"]:
-            idx = sentence_data["index"]
-            text = sentence_data["text"]
-            
-            logger.info(f"  🎤 Generating audio {idx + 1}/{total_sentences}: \"{text[:50]}...\"")
-            
-            audio_file = self.generate_audio_file(text, idx)
-            sentence_data["audio_file"] = audio_file
-            
-            # Calculate actual duration from audio file
-            if audio_file and os.path.exists(audio_file):
-                try:
-                    # Use mutagen or similar to get actual duration
-                    # For now, estimate based on word count (will be accurate enough)
-                    word_count = len(text.split())
-                    # Edge-TTS at normal rate: ~150 wpm = 0.4s per word
-                    duration = max(word_count * 0.4, 1.0)
-                    sentence_data["actual_audio_duration"] = duration
-                except Exception as e:
-                    logger.warning(f"⚠️  Could not determine audio duration: {e}")
+        if not full_text:
+            logger.warning("⚠️ No full_text in timeline, falling back to sentences")
+            # Fallback: use legacy sentence structure
+            total_sentences = len(timeline["sentences"])
+            for sentence_data in timeline["sentences"]:
+                idx = sentence_data["index"]
+                text = sentence_data["text"]
+                
+                logger.info(f"  🎤 Generating audio {idx + 1}/{total_sentences}: \"{text[:50]}...\"")
+                
+                audio_file = self.generate_audio_file(text, idx)
+                sentence_data["audio_file"] = audio_file
+                
+                # Calculate actual duration from audio file
+                if audio_file and os.path.exists(audio_file):
+                    try:
+                        word_count = len(text.split())
+                        duration = max(word_count * 0.35, 0.5)
+                        sentence_data["actual_audio_duration"] = duration
+                    except Exception as e:
+                        logger.warning(f"⚠️  Could not determine audio duration: {e}")
+                        sentence_data["actual_audio_duration"] = sentence_data["estimated_tts_duration"]
+                else:
                     sentence_data["actual_audio_duration"] = sentence_data["estimated_tts_duration"]
-            else:
-                sentence_data["actual_audio_duration"] = sentence_data["estimated_tts_duration"]
+            
+            logger.info(f"✅ Generated {total_sentences} audio files (legacy mode)")
+            return timeline
         
-        logger.info(f"✅ Generated {total_sentences} audio files")
+        # Generate single audio file for full text
+        logger.info(f"  🎤 Generating audio for full text: \"{full_text[:100]}...\"")
+        audio_file = self.generate_audio_file(full_text, 0)
+        
+        if audio_file and os.path.exists(audio_file):
+            # Try to get actual duration from audio file
+            try:
+                from mutagen.mp3 import MP3
+                audio = MP3(audio_file)
+                actual_duration = audio.info.length
+                logger.info(f"✅ Audio file duration: {actual_duration:.2f}s")
+            except:
+                # Fallback: use estimated duration from timeline
+                actual_duration = timeline["metadata"].get("total_duration", 0.0)
+                logger.info(f"✅ Using estimated duration: {actual_duration:.2f}s")
+            
+            # Store in timeline
+            timeline["audio_file"] = audio_file
+            timeline["actual_audio_duration"] = actual_duration
+            
+            # Also store in sentences[0] for backward compatibility
+            if timeline["sentences"]:
+                timeline["sentences"][0]["audio_file"] = audio_file
+                timeline["sentences"][0]["actual_audio_duration"] = actual_duration
+            
+            logger.info(f"✅ Generated audio file: {os.path.basename(audio_file)}")
+        else:
+            logger.error("❌ Failed to generate audio file")
+            timeline["audio_file"] = None
+            timeline["actual_audio_duration"] = timeline["metadata"].get("total_duration", 0.0)
+        
         return timeline
     
     def _create_hierarchical_tree_layout(self, graph: nx.DiGraph) -> Dict[str, Tuple[float, float]]:
         """
-        Create a clean top-to-bottom hierarchical tree layout.
-        Most connected concepts at top, least connected at bottom.
+        True hierarchical tree layout - root at top, children below.
+        Uses NetworkX's built-in tree layout.
         
         Args:
             graph: Directed graph
@@ -206,44 +241,74 @@ class PrecomputeEngine:
         if len(graph.nodes) == 0:
             return {}
         
-        # Calculate node importance (out-degree + in-degree)
-        importance = {}
-        for node in graph.nodes:
-            importance[node] = graph.out_degree(node) + graph.in_degree(node)
-        
-        # Group nodes by importance level
-        max_importance = max(importance.values()) if importance else 0
-        levels = {}
-        
-        for node, imp in importance.items():
-            # Create 3-4 levels
-            if max_importance == 0:
-                level = 0
-            else:
-                level = int((1.0 - imp / max_importance) * 3)  # 0 = top, 3 = bottom
+        try:
+            # Find the root node (most connected)
+            importance = {}
+            for node in graph.nodes:
+                importance[node] = graph.out_degree(node) + graph.in_degree(node)
             
-            if level not in levels:
-                levels[level] = []
-            levels[level].append(node)
-        
-        # Arrange nodes in hierarchical layout
-        pos = {}
-        y_spacing = 3.0
-        x_spacing = 3.0
-        
-        for level_idx, nodes in sorted(levels.items()):
-            y = -level_idx * y_spacing  # Top to bottom
-            num_nodes = len(nodes)
+            root = max(importance.items(), key=lambda x: x[1])[0]
             
-            # Center nodes horizontally
-            total_width = (num_nodes - 1) * x_spacing
-            start_x = -total_width / 2
+            # Use NetworkX's hierarchical layout with root at top
+            pos = nx.nx_agraph.graphviz_layout(graph, prog='dot', root=root)
             
-            for i, node in enumerate(sorted(nodes)):  # Sort for consistency
-                x = start_x + i * x_spacing
-                pos[node] = (x, y)
-        
-        return pos
+            # Scale the positions
+            scaled_pos = {}
+            for node, (x, y) in pos.items():
+                scaled_pos[node] = (x / 50, -y / 50)  # Scale and flip y
+            
+            logger.info(f"   Created tree layout with root: {root}")
+            return scaled_pos
+            
+        except Exception as e:
+            logger.warning(f"   graphviz not available, using manual tree layout: {e}")
+            
+            # Fallback: Simple hierarchical based on importance only
+            importance = {}
+            for node in graph.nodes:
+                importance[node] = graph.out_degree(node) + graph.in_degree(node)
+            
+            # Sort by importance
+            sorted_nodes = sorted(importance.items(), key=lambda x: x[1], reverse=True)
+            
+            # Assign to levels based on importance tiers
+            # Most important = Level 0 (top)
+            # Medium importance = Level 1 (middle)
+            # Least important = Level 2 (bottom)
+            pos = {}
+            num_nodes = len(sorted_nodes)
+            
+            if num_nodes == 0:
+                return {}
+            
+            # Calculate level for each node based on importance rank
+            for idx, (node, imp) in enumerate(sorted_nodes):
+                rank = idx / max(num_nodes - 1, 1)  # 0.0 to 1.0
+                
+                # Assign level: 0 (top), 1 (middle), 2 (bottom)
+                if rank < 0.33:
+                    level = 0
+                elif rank < 0.67:
+                    level = 1
+                else:
+                    level = 2
+                
+                # Y position based on level
+                y = -level * 6.0  # Larger vertical spacing
+                
+                # X position: spread horizontally within level
+                # Count how many nodes are at this level so far
+                nodes_at_level = [n for n, i in sorted_nodes[:idx+1] 
+                                 if (sorted_nodes.index((n, i)) / max(num_nodes - 1, 1)) >= rank - 0.33 
+                                 and (sorted_nodes.index((n, i)) / max(num_nodes - 1, 1)) < rank + 0.34]
+                x_index = len([n for n in nodes_at_level if n != node])
+                x_offset = (x_index - len(nodes_at_level) / 2) * 5.0
+                
+                pos[node] = (x_offset, y)
+            
+            root = sorted_nodes[0][0]
+            logger.info(f"   Created simple hierarchical layout with root: {root}, 3 tiers")
+            return pos
     
     def _create_shell_groups(self, graph: nx.DiGraph) -> List[List[str]]:
         """
@@ -320,12 +385,18 @@ class PrecomputeEngine:
             graph.add_node(concept_name)
         
         # Add all relationships
+        edges_added = 0
         for sentence_data in timeline["sentences"]:
             for rel in sentence_data["relationships"]:
                 if rel["from"] in all_concepts and rel["to"] in all_concepts:
                     graph.add_edge(rel["from"], rel["to"])
+                    edges_added += 1
         
         logger.info(f"📐 Calculating '{layout_style}' graph layout...")
+        logger.info(f"   Graph: {len(graph.nodes())} nodes, {len(graph.edges())} edges (added {edges_added})")
+        
+        if len(graph.edges()) == 0:
+            logger.warning("⚠️ Graph has NO edges! Hierarchical layout will not work well. Check LLM relationship extraction!")
         
         pos = None
         

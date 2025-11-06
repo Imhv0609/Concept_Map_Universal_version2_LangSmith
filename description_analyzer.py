@@ -43,8 +43,18 @@ def analyze_description_complexity(description: str) -> Dict[str, Any]:
             "connection_density": "low",
             "educational_depth": "introductory"
         }
+    elif word_count <= 20:  # Very short description (one sentence)
+        # More conservative scaling for very short text
+        base_concepts = 3 + math.log2(word_count) * 0.8
+        complexity = {
+            "target_concepts": int(min(base_concepts, 5)),  # Cap at 5 for very short
+            "target_subtopics": 1,
+            "detail_level": "basic",
+            "connection_density": "low",
+            "educational_depth": "basic"
+        }
     elif word_count <= 50:  # Short description (1-2 sentences)
-        base_concepts = 4 + math.log2(word_count) * 1.5
+        base_concepts = 4 + math.log2(word_count) * 1.2
         complexity = {
             "target_concepts": int(min(base_concepts, 8)),
             "target_subtopics": 2,

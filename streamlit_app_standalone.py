@@ -104,7 +104,7 @@ def render_graph(G, pos, visible_nodes, new_nodes, alpha_map, scale_map, show_ed
         scale_map: Dict of node scale values (for pop-in)
         show_edge_labels: Whether to show relationship labels on edges
     """
-    fig, ax = plt.subplots(figsize=(14, 10))
+    fig, ax = plt.subplots(figsize=(16, 12), dpi=100)  # Larger canvas, better resolution
     ax.set_facecolor('#ffffff')
     fig.patch.set_facecolor('#ffffff')
     
@@ -112,18 +112,23 @@ def render_graph(G, pos, visible_nodes, new_nodes, alpha_map, scale_map, show_ed
     visible_edges = [(u, v) for u, v in G.edges() 
                      if u in visible_nodes and v in visible_nodes]
     
+    logger.debug(f"render_graph: {len(G.nodes())} total nodes, {len(G.edges())} total edges, {len(visible_nodes)} visible nodes, {len(visible_edges)} visible edges")
+    
     if visible_edges:
         nx.draw_networkx_edges(
             G, pos,
             edgelist=visible_edges,
-            edge_color='#34495e',
-            alpha=0.7,
-            width=2.5,
+            edge_color='#5a6c7d',  # Darker gray for better visibility
+            alpha=0.6,  # More opaque
+            width=2.5,  # Thicker edges
             arrows=True,
-            arrowsize=25,
-            arrowstyle='->',
+            arrowsize=25,  # Larger arrows (increased from 15 to 25)
+            arrowstyle='-|>',  # Filled arrow style for better visibility
             ax=ax,
-            connectionstyle='arc3,rad=0.1'
+            connectionstyle='arc3,rad=0.05',  # Straighter edges
+            node_size=3000,  # Helps arrows appear at proper distance from nodes
+            min_source_margin=20,  # Arrow starts away from source node
+            min_target_margin=20   # Arrow ends away from target node
         )
     
     # Draw nodes with animations
@@ -132,22 +137,23 @@ def render_graph(G, pos, visible_nodes, new_nodes, alpha_map, scale_map, show_ed
             continue
             
         x, y = pos[node]
-        alpha = alpha_map.get(node, 1.0)
-        scale = scale_map.get(node, 1.0)
+        # NO ANIMATIONS - nodes and labels appear instantly at full opacity
+        alpha = 1.0  # Always fully visible
+        scale = 1.0  # Always full size
         
-        # Node size with scale animation
+        # Node size - no animation
         base_size = 3000
-        node_size = base_size * scale
+        node_size = base_size
         
-        # Node color with alpha
+        # Node color - distinctive colors for new vs existing nodes
         if node in new_nodes:
-            # Gold color for new nodes
-            color = (1.0, 0.84, 0.0, alpha)  # Gold with alpha
-            edge_color = 'gold'
-            edge_width = 4
+            # Bright vibrant orange/gold for NEW nodes - very eye-catching
+            color = (1.0, 0.6, 0.0, 1.0)  # Vibrant orange-gold, fully opaque
+            edge_color = '#ff6b00'  # Bright orange border
+            edge_width = 5  # Thicker border for new nodes
         else:
-            # Blue color for existing nodes
-            color = (0.12, 0.47, 0.71, alpha)  # Blue with alpha
+            # Blue color for EXISTING nodes
+            color = (0.2, 0.5, 0.8, 1.0)  # Lighter blue, fully opaque
             edge_color = '#1f77b4'
             edge_width = 2
         
@@ -155,9 +161,12 @@ def render_graph(G, pos, visible_nodes, new_nodes, alpha_map, scale_map, show_ed
         ax.scatter([x], [y], s=node_size, c=[color], 
                   edgecolors=edge_color, linewidth=edge_width, zorder=2)
         
-        # Draw label with alpha
-        ax.text(x, y, node, fontsize=10, fontweight='bold',
-               ha='center', va='center', color='white', alpha=alpha, zorder=3)
+        # Draw label BELOW the node (not inside) to avoid overlap
+        # Label is ALWAYS fully visible (alpha=1.0) even when node is fading in
+        label_y = y - 0.8  # Position text below the node
+        ax.text(x, label_y, node, fontsize=10, fontweight='bold',
+               ha='center', va='top', color='#2c3e50', alpha=1.0, zorder=4,
+               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=1.0, edgecolor='none'))
     
     # Draw edge labels (relationship names) if enabled
     if show_edge_labels and visible_edges:
@@ -170,14 +179,31 @@ def render_graph(G, pos, visible_nodes, new_nodes, alpha_map, scale_map, show_ed
                 edge_labels[(u, v)] = rel_type
         
         if edge_labels:
-            nx.draw_networkx_edge_labels(
-                G, pos,
-                edge_labels=edge_labels,
-                font_size=9,
-                font_color='#2C3E50',
-                bbox=dict(boxstyle='round,pad=0.4', facecolor='white', alpha=0.8, edgecolor='#bdc3c7'),
-                ax=ax
-            )
+            # Draw edge labels with minimal padding and background
+            for (u, v), label in edge_labels.items():
+                # Calculate position along the edge
+                x1, y1 = pos[u]
+                x2, y2 = pos[v]
+                
+                # Position label at midpoint (edges are straighter now)
+                label_x = (x1 + x2) / 2
+                label_y = (y1 + y2) / 2
+                
+                # Add text with minimal background - larger font, tighter padding
+                ax.text(
+                    label_x, label_y, label,
+                    fontsize=9,  # Larger font (was 7)
+                    color='#4a5568',  # Slightly darker for better readability
+                    ha='center',
+                    va='center',
+                    bbox=dict(
+                        boxstyle='round,pad=0.15',  # Tighter padding (was 0.2)
+                        facecolor='white',
+                        alpha=0.9,  # More opaque (was 0.85)
+                        edgecolor='none'
+                    ),
+                    zorder=3  # Above edges but below nodes
+                )
     
     ax.axis('off')
     plt.tight_layout()
@@ -287,22 +313,99 @@ def play_audio(audio_file, wait_for_audio=True):
     return False
 
 
-def run_dynamic_visualization(timeline, layout_style="hierarchical", show_edge_labels=True):
+def reveal_concepts_progressively(
+    graph_placeholder, G, pos, concepts, elapsed_time, 
+    visible_nodes, show_edge_labels=True, animation_duration=0.5
+):
     """
-    Run the dynamic visualization with animations and audio.
+    Reveal concepts that should be visible at current elapsed time.
     
     Args:
-        timeline: Timeline data structure
+        graph_placeholder: Streamlit placeholder for graph
+        G: NetworkX graph
+        pos: Node positions
+        concepts: List of all concepts with reveal_time
+        elapsed_time: Current elapsed time since audio started
+        visible_nodes: Set of already visible nodes
+        show_edge_labels: Whether to show relationship labels
+        animation_duration: Duration of fade-in animation (seconds)
+        
+    Returns:
+        Updated set of visible nodes
+    """
+    # Find concepts that should be revealed now
+    newly_revealed = []
+    for concept in concepts:
+        concept_name = concept.get('name', '')
+        reveal_time = concept.get('reveal_time', 0.0)
+        
+        if concept_name and reveal_time <= elapsed_time and concept_name not in visible_nodes:
+            newly_revealed.append(concept_name)
+            logger.debug(f"     → Revealing '{concept_name}' at {elapsed_time:.2f}s (reveal_time: {reveal_time:.2f}s)")
+    
+    if not newly_revealed:
+        # No new concepts to reveal, but still render current state
+        if visible_nodes:
+            logger.debug(f"     → No new concepts, rendering {len(visible_nodes)} existing nodes")
+            fig = render_graph(G, pos, visible_nodes, set(), {}, {}, show_edge_labels)
+            with graph_placeholder:
+                st.pyplot(fig)
+            plt.close(fig)
+        return visible_nodes
+    
+    # Animate new concepts with fade-in
+    new_nodes_set = set(newly_revealed)
+    alpha_map = {node: 0.0 for node in new_nodes_set}
+    scale_map = {node: 0.3 for node in new_nodes_set}
+    
+    steps = max(5, int(animation_duration * 10))  # 10 fps
+    
+    for step in range(steps + 1):
+        progress = step / steps
+        
+        # Update alpha and scale
+        for node in new_nodes_set:
+            alpha_map[node] = progress
+            scale_map[node] = 0.3 + (0.7 * progress)
+        
+        # Render graph with new nodes for animation
+        current_visible = visible_nodes | new_nodes_set
+        
+        # Render graph (it will calculate visible edges internally)
+        fig = render_graph(G, pos, current_visible, new_nodes_set, alpha_map, scale_map, show_edge_labels)
+        
+        with graph_placeholder:
+            st.pyplot(fig)
+        
+        plt.close(fig)
+        
+        # Small delay between frames
+        if step < steps:
+            time.sleep(animation_duration / steps)
+    
+    # Add newly revealed nodes to visible set
+    return visible_nodes | new_nodes_set
+
+
+def run_dynamic_visualization(timeline, layout_style="hierarchical", show_edge_labels=True):
+    """
+    Run the dynamic visualization with continuous audio and keyword-timed reveals.
+    
+    Args:
+        timeline: Timeline data structure (continuous format)
         layout_style: Layout algorithm to use
         show_edge_labels: Whether to show relationship labels on edges
     """
     st.markdown("---")
-    st.markdown("### 🎬 Dynamic Concept Map")
+    st.markdown("### 🎬 Dynamic Concept Map (Keyword-Timed)")
     
     # Debug: Show timeline structure
     with st.expander("🔍 Debug Info (Click to expand)", expanded=False):
-        st.write(f"**Total Sentences:** {len(timeline['sentences'])}")
-        st.write(f"**Total Concepts in Metadata:** {timeline['metadata'].get('total_concepts', 0)}")
+        st.write(f"**Format:** Continuous Timeline (single audio file)")
+        st.write(f"**Total Words:** {timeline['metadata'].get('word_count', 0)}")
+        st.write(f"**Total Duration:** {timeline['metadata'].get('total_duration', 0):.1f}s")
+        st.write(f"**Total Concepts:** {timeline['metadata'].get('total_concepts', 0)}")
+        st.write(f"**Total Relationships:** {len(timeline.get('relationships', []))}")
         
         # Check first sentence structure
         if timeline["sentences"]:
@@ -313,50 +416,62 @@ def run_dynamic_visualization(timeline, layout_style="hierarchical", show_edge_l
     # Create graph
     G = nx.DiGraph()
     
-    # Create layout - IMPROVED: Handle both dict and list formats
+    # Get concepts and relationships from timeline (continuous format)
     all_concepts = set()
-    for sent in timeline["sentences"]:
-        concepts = sent.get("concepts", [])
+    concepts = timeline.get("concepts", [])
+    
+    # Extract concept names
+    for concept in concepts:
+        if isinstance(concept, dict):
+            concept_name = concept.get("name", "")
+        else:
+            concept_name = str(concept)
         
-        # Handle both list of dicts and list of strings
-        for concept in concepts:
-            if isinstance(concept, dict):
-                concept_name = concept.get("name", "")
-            else:
-                concept_name = str(concept)
-            
-            if concept_name.strip():
-                all_concepts.add(concept_name)
+        if concept_name.strip():
+            all_concepts.add(concept_name)
+    
+    logger.info(f"📊 Building graph with {len(all_concepts)} concepts")
     
     # Add nodes to graph
-    for concept in all_concepts:
-        G.add_node(concept)
+    for concept_name in all_concepts:
+        G.add_node(concept_name)
     
-    # Add edges from relationships
-    for sent in timeline["sentences"]:
-        relationships = sent.get("relationships", [])
-        for rel in relationships:
-            if isinstance(rel, dict):
-                from_node = rel.get("from", "")
-                to_node = rel.get("to", "")
-                if from_node in all_concepts and to_node in all_concepts:
-                    G.add_edge(from_node, to_node)
+    # Add edges from relationships (top-level relationships array)
+    relationships = timeline.get("relationships", [])
+    logger.info(f"🔗 Processing {len(relationships)} relationships")
+    
+    edges_added = 0
+    for rel in relationships:
+        if isinstance(rel, dict):
+            from_node = rel.get("from", "")
+            to_node = rel.get("to", "")
+            rel_type = rel.get("relationship", "related to")
+            
+            if from_node in all_concepts and to_node in all_concepts:
+                G.add_edge(from_node, to_node, relationship=rel_type)
+                edges_added += 1
+                logger.debug(f"  ➜ Added edge: {from_node} --[{rel_type}]--> {to_node}")
+    
+    logger.info(f"✅ Graph built: {len(G.nodes())} nodes, {len(G.edges())} edges (added {edges_added})")
     
     # Get pre-computed layout from timeline (preferred) or calculate fallback
     pos = timeline.get("pre_calculated_layout", timeline.get("layout", {}))
     
+    logger.info(f"📐 Layout info: pre_calculated_layout exists={bool(pos)}, positions={len(pos) if pos else 0}")
+    if pos:
+        logger.info(f"   Sample positions: {list(pos.items())[:3]}")
+    
     # If no layout provided, calculate one using selected style (fallback only)
     if not pos or len(pos) == 0:
+        logger.warning("⚠️ No pre-calculated layout found! Calculating fallback layout...")
         if len(G.nodes()) > 0:
             try:
                 if layout_style == "hierarchical":
-                    # Try to create hierarchical layout
-                    try:
-                        from networkx.drawing.nx_agraph import graphviz_layout
-                        pos = graphviz_layout(G, prog='dot')
-                    except:
-                        # Fallback to spring layout if graphviz not available
-                        pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
+                    # Use SAME implementation as PrecomputeEngine for consistency
+                    from precompute_engine import PrecomputeEngine
+                    engine = PrecomputeEngine()
+                    pos = engine._create_hierarchical_tree_layout(G)
+                    logger.info(f"✅ Created hierarchical layout using PrecomputeEngine (consistent)")
                 elif layout_style == "shell":
                     pos = nx.shell_layout(G)
                 elif layout_style == "circular":
@@ -392,7 +507,7 @@ def run_dynamic_visualization(timeline, layout_style="hierarchical", show_edge_l
         st.caption(f"Total concepts to display: {len(all_concepts)}")
         graph_placeholder = st.empty()
         
-        # Initial empty graph (or show message if no concepts)
+        # Initial empty graph
         if len(all_concepts) > 0:
             fig = render_graph(G, pos, set(), set(), {}, {}, show_edge_labels)
             graph_placeholder.pyplot(fig)
@@ -401,95 +516,153 @@ def run_dynamic_visualization(timeline, layout_style="hierarchical", show_edge_l
             graph_placeholder.warning("Waiting for concepts...")
     
     with col2:
-        st.markdown("#### 📝 Narration Progress")
+        st.markdown("#### 📝 Progress")
         progress_placeholder = st.empty()
-        sentence_placeholder = st.empty()
+        timer_placeholder = st.empty()
         concepts_placeholder = st.empty()
         
-        # Audio section
+        # Audio section - will be populated when visualization starts
         st.markdown("---")
         st.markdown("#### 🔊 Audio Narration")
         audio_placeholder = st.empty()
-        audio_info = st.empty()
+        audio_control_info = st.empty()
     
-    # Animation state
-    visible_nodes = set()
+    # Button-triggered visualization with state management
+    st.markdown("---")
     
-    # Iterate through sentences
-    for idx, sentence_data in enumerate(timeline["sentences"]):
-        # Update progress
-        with progress_placeholder:
-            progress = (idx + 1) / len(timeline["sentences"])
-            st.progress(progress, text=f"Sentence {idx + 1}/{len(timeline['sentences'])}")
+    # Get audio file and concepts
+    audio_file = timeline.get("audio_file")
+    concepts = timeline.get("concepts", [])
+    total_duration = timeline.get("actual_audio_duration", 
+                                  timeline["metadata"].get("total_duration", 0.0))
+    
+    if audio_file and os.path.exists(audio_file):
+        # Initialize session state for visualization control
+        if 'viz_started' not in st.session_state:
+            st.session_state.viz_started = False
+        if 'viz_completed' not in st.session_state:
+            st.session_state.viz_completed = False
         
-        # Show current sentence
-        with sentence_placeholder:
-            st.info(f"🗣️ **{sentence_data['text']}**")
+        # DEBUG: Show current state
+        st.write(f"🔍 DEBUG: viz_started = {st.session_state.viz_started}, viz_completed = {st.session_state.viz_completed}")
         
-        # Show concepts being revealed - FIXED: Handle both dict and string formats
-        concepts = sentence_data.get('concepts', [])
-        concept_names = []
-        for c in concepts:
-            if isinstance(c, dict):
-                name = c.get('name', '')
-            else:
-                name = str(c)
-            if name.strip():
-                concept_names.append(name)
-        
-        with concepts_placeholder:
-            if concept_names:
-                st.success(f"💡 **Concepts:** {', '.join(concept_names)}")
-            else:
-                st.info("💡 **Concepts:** (None in this sentence)")
-        
-        # Play audio if available
-        audio_file = sentence_data.get('audio_file')
-        if audio_file and os.path.exists(audio_file):
-            with audio_placeholder.container():
-                st.audio(audio_file, format='audio/mp3')
-            with audio_info:
-                st.info("🎧 **Click ▶️ above to hear this sentence**")
+        # Show instructions and button if not started
+        if not st.session_state.viz_started:
+            st.info("🎧 **Instructions:** Click the button below to start visualization with audio narration")
             
-            # Wait for audio duration so user has time to listen
-            try:
-                from mutagen.mp3 import MP3
-                audio = MP3(audio_file)
-                duration = audio.info.length
-                time.sleep(duration + 0.5)  # Add 0.5s pause between sentences
-            except:
-                time.sleep(3.0)  # Default pause
+            # Show audio duration info
+            with audio_control_info:
+                st.info(f"📊 **Ready:** {total_duration:.1f}s duration | {len(concepts)} concepts")
+            
+            start_button = st.button("🚀 Start Visualization with Audio", type="primary", use_container_width=True, key="start_viz_btn")
+            
+            if start_button:
+                logger.info("🔴 BUTTON CLICKED! Setting viz_started=True")
+                st.session_state.viz_started = True
+                st.write("✅ Button clicked! State updated. Script will continue...")
+                # No st.rerun() needed - button click automatically triggers rerun!
+        
+        # Run visualization if started but not completed
+        elif st.session_state.viz_started and not st.session_state.viz_completed:
+            logger.info("🟢 ENTERING VISUALIZATION BLOCK")
+            st.write("🟢 Visualization block entered!")
+            
+            # NOW show the audio player (won't be recreated on subsequent updates)
+            with audio_placeholder:
+                st.audio(audio_file, format='audio/mp3', autoplay=True)
+            
+            with audio_control_info:
+                st.success(f"🎧 **Playing:** {total_duration:.1f}s | {len(concepts)} concepts")
+            
+            st.info("⏳ **Playing...** Watch as concepts appear synchronized with the narration!")
+            
+            # Debug logging
+            logger.info(f"🚀 VISUALIZATION STARTED")
+            logger.info(f"   Total concepts: {len(concepts)}")
+            logger.info(f"   Total duration: {total_duration:.2f}s")
+            logger.info(f"   Graph has {len(G.nodes())} nodes, {len(pos)} positions")
+            
+            # Progressive reveal over duration
+            visible_nodes = set()
+            recently_revealed = {}  # Track when each node was revealed {node: reveal_time}
+            highlight_duration = 1.5  # Keep nodes orange for 1.5 seconds after reveal
+            num_steps = min(len(concepts) * 3, 50)  # 3 steps per concept, max 50
+            time_per_step = total_duration / num_steps if num_steps > 0 else 0.5
+            
+            logger.info(f"   Will reveal over {num_steps} steps, {time_per_step:.2f}s per step")
+            
+            for step in range(num_steps + 1):
+                elapsed = (step / num_steps) * total_duration if num_steps > 0 else 0
+                
+                # Update progress
+                with progress_placeholder:
+                    progress = step / num_steps if num_steps > 0 else 1.0
+                    st.progress(progress, text=f"Progress: {int(progress * 100)}%")
+                
+                # Update timer
+                with timer_placeholder:
+                    st.metric("⏱️ Elapsed Time", f"{elapsed:.1f}s / {total_duration:.1f}s")
+                
+                # Reveal concepts that should be visible now
+                prev_count = len(visible_nodes)
+                for concept in concepts:
+                    concept_name = concept.get('name', '')
+                    reveal_time = concept.get('reveal_time', 0.0)
+                    if concept_name and reveal_time <= elapsed and concept_name not in visible_nodes:
+                        visible_nodes.add(concept_name)
+                        recently_revealed[concept_name] = elapsed  # Track when revealed
+                        logger.info(f"   ✨ Revealing '{concept_name}' at {elapsed:.2f}s")
+                
+                # Determine which nodes are still "new" (revealed within last 3 seconds)
+                new_nodes = {node for node, reveal_time in recently_revealed.items() 
+                            if elapsed - reveal_time < highlight_duration}
+                
+                # Render graph with currently visible nodes and highlight new ones
+                if len(visible_nodes) > 0:
+                    fig = render_graph(G, pos, visible_nodes, new_nodes, {}, {}, show_edge_labels)
+                    with graph_placeholder:
+                        st.pyplot(fig)
+                    plt.close(fig)
+                    logger.debug(f"   📊 Rendered graph with {len(visible_nodes)} nodes ({len(new_nodes)} highlighted)")
+                
+                # Update concepts counter
+                with concepts_placeholder:
+                    if len(visible_nodes) > 0:
+                        st.success(f"💡 **Revealed:** {len(visible_nodes)}/{len(concepts)} concepts")
+                    else:
+                        st.info(f"💡 **Waiting for first concept...**")
+                
+                # Wait before next step
+                if step < num_steps:
+                    time.sleep(time_per_step)
+            
+            # Mark as completed
+            st.session_state.viz_completed = True
+            
+            # Final view
+            with progress_placeholder:
+                st.success("✅ Complete!")
+            
+            with timer_placeholder:
+                st.balloons()
+                st.success(f"🎉 **All {len(visible_nodes)} concepts revealed!**")
+            
+            with concepts_placeholder:
+                st.info(f"📊 **Concepts:** {', '.join(sorted(visible_nodes))}")
+            
+            logger.info(f"✅ VISUALIZATION COMPLETED")
+        
+        # Show completed state
         else:
-            # Fallback: estimate duration
-            time.sleep(sentence_data.get('estimated_tts_duration', 2.0))
+            st.success("✅ **Visualization completed!** Generate a new concept map to see another animation.")
+            with progress_placeholder:
+                st.success("✅ Complete!")
+            with timer_placeholder:
+                st.success(f"🎉 **All concepts revealed!**")
         
-        # Animate new concepts
-        animate_fade_in(graph_placeholder, G, pos, sentence_data, 
-                       visible_nodes, show_edge_labels, 
-                       animation_duration=0.8, steps=15)
-        
-        # Update visible nodes - FIXED: Handle both dict and string formats
-        for concept in sentence_data.get('concepts', []):
-            if isinstance(concept, dict):
-                name = concept.get('name', '')
-            else:
-                name = str(concept)
-            if name.strip():
-                visible_nodes.add(name)
-        
-        # Pause before next sentence
-        time.sleep(0.5)
-    
-    # Final view
-    with progress_placeholder:
-        st.success("✅ Complete!")
-    
-    with sentence_placeholder:
-        st.balloons()
-        st.success(f"🎉 **Concept map complete!** ({len(visible_nodes)} concepts)")
-    
-    with concepts_placeholder:
-        st.info(f"📊 **All Concepts:** {', '.join(sorted(visible_nodes))}")
+    else:
+        st.error("❌ Audio file not found. Cannot start visualization.")
+        logger.error(f"Audio file missing: {audio_file}")
 
 
 def main():
@@ -569,6 +742,15 @@ def main():
             st.error("⚠️ Please enter a description first!")
             return
         
+        # Clear previous session state to ensure fresh generation
+        if 'timeline' in st.session_state:
+            del st.session_state.timeline
+        if 'viz_started' in st.session_state:
+            del st.session_state.viz_started
+        if 'viz_completed' in st.session_state:
+            del st.session_state.viz_completed
+        logger.info("🧹 Cleared previous session state for fresh generation")
+        
         # Show loading
         with st.spinner("🔄 Processing..."):
             try:
@@ -611,15 +793,25 @@ def main():
                     st.write(f"✅ Calculated {layout_style} graph layout")
                     status.update(label="✅ Assets ready!", state="complete")
                 
-                # Step 3: Run visualization with selected options
-                run_dynamic_visualization(timeline, layout_style, show_edge_labels)
+                # Step 3: Store timeline in session state for persistence
+                st.session_state.timeline = timeline
+                st.session_state.layout_style = layout_style
+                st.session_state.show_edge_labels = show_edge_labels
+                st.session_state.engine = engine
                 
-                # Cleanup
-                engine.cleanup()
+                # Step 4: Run visualization with selected options
+                run_dynamic_visualization(timeline, layout_style, show_edge_labels)
                 
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
                 logger.exception("Error during generation")
+    
+    # If timeline exists in session state, continue showing visualization
+    elif 'timeline' in st.session_state and st.session_state.timeline:
+        timeline = st.session_state.timeline
+        layout_style = st.session_state.get('layout_style', 'hierarchical')
+        show_edge_labels = st.session_state.get('show_edge_labels', True)
+        run_dynamic_visualization(timeline, layout_style, show_edge_labels)
     
     # Example descriptions
     with st.expander("📚 Example Descriptions (Click to use)"):
