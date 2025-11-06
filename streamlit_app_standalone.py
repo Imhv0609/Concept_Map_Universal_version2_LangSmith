@@ -2,6 +2,7 @@
 Standalone Streamlit App for Dynamic Concept Maps
 ==================================================
 Single-page app where you can input a description and see the dynamic concept map.
+Version: 2.0 - Continuous Timeline Mode with instant node/label appearance
 """
 
 import streamlit as st
