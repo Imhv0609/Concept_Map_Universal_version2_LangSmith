@@ -169,11 +169,12 @@ def calculate_word_timings(text: str, speaking_rate: float = 0.35) -> List[Dict]
     for word in words:
         word_duration = speaking_rate
         
-        # Adjust duration for punctuation (add slight pause)
+        # Adjust duration for punctuation (add slight pause for gTTS)
+        # gTTS adds natural pauses, so we account for them here
         if word.endswith(('.', '!', '?')):
-            word_duration += 0.3  # 300ms pause after sentence
+            word_duration += 0.4  # 400ms pause after sentence (gTTS adds natural pause)
         elif word.endswith((',', ';', ':')):
-            word_duration += 0.15  # 150ms pause after clause
+            word_duration += 0.2  # 200ms pause after clause
         
         word_timings.append({
             "word": word,
@@ -496,8 +497,10 @@ def create_timeline(
         description, educational_level
     )
     
-    # Step 4: Calculate word-level timings (0.35s per word)
-    speaking_rate = 0.35  # seconds per word
+    # Step 4: Calculate word-level timings
+    # gTTS speaking rate: ~150-160 WPM = 0.375-0.40s per word
+    # Using 0.40s per word for better sync with gTTS (slightly slower than Edge-TTS's 0.35s)
+    speaking_rate = 0.40  # seconds per word - tuned for gTTS
     word_timings = calculate_word_timings(full_text, speaking_rate)
     total_duration = word_timings[-1]['end_time'] if word_timings else 0.0
     logger.info(f"⏱️ Calculated timings for {len(word_timings)} words (total: {total_duration:.1f}s)")
@@ -505,6 +508,15 @@ def create_timeline(
     # Step 5: Assign reveal_time to each concept
     concepts = assign_concept_reveal_times(concepts, word_timings, full_text)
     logger.info(f"✅ Assigned reveal times to {len(concepts)} concepts")
+    
+    # CRITICAL: Force the first concept to appear immediately at time 0
+    # This ensures the visualization starts right away and doesn't have a delay
+    if concepts and len(concepts) > 0:
+        # Find the concept with earliest reveal time and set it to 0
+        earliest_concept = min(concepts, key=lambda c: c.get('reveal_time', 0.0))
+        original_time = earliest_concept.get('reveal_time', 0.0)
+        earliest_concept['reveal_time'] = 0.0
+        logger.info(f"⚡ Forced first concept '{earliest_concept.get('name')}' to appear at 0.0s (was {original_time:.2f}s)")
     
     timeline = {
         "metadata": {

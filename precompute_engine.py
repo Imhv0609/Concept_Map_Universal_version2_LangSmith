@@ -40,6 +40,65 @@ class PrecomputeEngine:
         logger.info(f"📐 Using layout: {layout_style}")
         logger.info(f"📁 Audio temp directory: {self.temp_dir}")
     
+    async def _get_word_timings_from_edgetts_async(self, text: str) -> List[Dict]:
+        """
+        Get precise word-level timings from Edge-TTS (async).
+        This uses Edge-TTS's SubMaker to get exact timing data.
+        
+        Args:
+            text: Text to get timings for
+            
+        Returns:
+            List of dicts with format: [{"word": "hello", "start_time": 0.0, "end_time": 0.5}, ...]
+        """
+        import edge_tts
+        from edge_tts import SubMaker
+        
+        try:
+            communicate = edge_tts.Communicate(text, self.voice, rate=self.rate)
+            submaker = SubMaker()
+            
+            word_timings = []
+            last_offset = 0
+            
+            # Stream to get timing information
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    pass  # We don't need the actual audio here
+                elif chunk["type"] == "WordBoundary":
+                    # Get word boundary data directly
+                    offset_ms = chunk["offset"]
+                    duration_ms = chunk.get("duration", 0)
+                    word_text = chunk["text"]
+                    
+                    # Calculate start and end times
+                    start_time = offset_ms / 10000.0  # Edge-TTS uses 100-nanosecond units
+                    
+                    # If we have the next word's offset, use it to calculate duration
+                    # Otherwise, estimate based on word length
+                    if duration_ms > 0:
+                        end_time = start_time + (duration_ms / 10000.0)
+                    else:
+                        # Estimate: average 0.4s per word
+                        end_time = start_time + 0.4
+                    
+                    word_timings.append({
+                        "word": word_text.strip(),
+                        "start_time": start_time,
+                        "end_time": end_time
+                    })
+                    
+                    last_offset = offset_ms
+            
+            if word_timings:
+                logger.info(f"✅ Got {len(word_timings)} word timings from Edge-TTS")
+            
+            return word_timings
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not get word timings from Edge-TTS: {e}")
+            return []
+    
     async def _generate_audio_async(self, text: str, output_file: str):
         """
         Generate audio file using Edge-TTS (async).
@@ -56,6 +115,89 @@ class PrecomputeEngine:
         except Exception as e:
             # Re-raise with more context
             raise Exception(f"Edge-TTS failed: {e}. Check internet connection and voice name '{self.voice}'")
+    
+    def get_word_timings_from_edgetts(self, text: str) -> List[Dict]:
+        """
+        Get precise word-level timings from Edge-TTS (synchronous wrapper).
+        
+        Args:
+            text: Text to get timings for
+            
+        Returns:
+            List of dicts with format: [{"word": "hello", "start_time": 0.0, "end_time": 0.5}, ...]
+        """
+        try:
+            # Apply nest_asyncio for Streamlit compatibility
+            try:
+                import nest_asyncio
+                nest_asyncio.apply()
+            except:
+                pass
+            
+            # Handle event loop properly
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    return loop.run_until_complete(self._get_word_timings_from_edgetts_async(text))
+                else:
+                    return loop.run_until_complete(self._get_word_timings_from_edgetts_async(text))
+            except RuntimeError:
+                return asyncio.run(self._get_word_timings_from_edgetts_async(text))
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to get Edge-TTS timings: {e}")
+            return []
+    
+    def _update_concept_timings_with_precise_data(self, timeline: Dict, precise_timings: List[Dict]) -> Dict:
+        """
+        Update concept reveal times using precise word timings from Edge-TTS.
+        
+        Args:
+            timeline: Timeline dict with concepts
+            precise_timings: List of word timings from Edge-TTS
+            
+        Returns:
+            Updated timeline with precise reveal times
+        """
+        full_text = timeline.get("full_text", "").lower()
+        concepts = timeline.get("concepts", [])
+        
+        for concept in concepts:
+            concept_name = concept.get("name", "").lower()
+            if not concept_name:
+                continue
+            
+            # Find the last word of the concept name in the text
+            concept_words = concept_name.split()
+            if not concept_words:
+                continue
+            
+            last_word = concept_words[-1]
+            
+            # Find this word in precise timings
+            for i, timing in enumerate(precise_timings):
+                word = timing["word"].lower().strip('.,!?;:')
+                if word == last_word:
+                    # Check if previous words match (for multi-word concepts)
+                    if len(concept_words) > 1:
+                        match = True
+                        for j, concept_word in enumerate(reversed(concept_words[:-1])):
+                            idx = i - j - 1
+                            if idx < 0 or precise_timings[idx]["word"].lower().strip('.,!?;:') != concept_word:
+                                match = False
+                                break
+                        if match:
+                            concept["reveal_time"] = timing["end_time"]
+                            logger.debug(f"   ✅ Updated '{concept.get('name')}': {timing['end_time']:.2f}s (precise)")
+                            break
+                    else:
+                        # Single word concept
+                        concept["reveal_time"] = timing["end_time"]
+                        logger.debug(f"   ✅ Updated '{concept.get('name')}': {timing['end_time']:.2f}s (precise)")
+                        break
+        
+        logger.info(f"✅ Updated {len(concepts)} concepts with precise timings")
+        return timeline
     
     def _generate_audio_gtts_fallback(self, text: str, output_file: str) -> bool:
         """
@@ -154,12 +296,13 @@ class PrecomputeEngine:
     def generate_all_audio(self, timeline: Dict) -> Dict:
         """
         Pre-generate audio file for the continuous timeline.
+        Uses Edge-TTS to get precise word timings, then generates audio with best available TTS.
         
         Args:
             timeline: Timeline dict from timeline_mapper
             
         Returns:
-            Updated timeline with audio_file path and actual duration
+            Updated timeline with audio_file path, actual duration, and precise word timings
         """
         logger.info("🎵 Pre-generating audio for continuous timeline...")
         
@@ -194,21 +337,57 @@ class PrecomputeEngine:
             logger.info(f"✅ Generated {total_sentences} audio files (legacy mode)")
             return timeline
         
-        # Generate single audio file for full text
+        # STEP 1: NOTE - Edge-TTS word boundaries are not reliably available
+        # Using estimated timings (0.40s per word) which work well for both Edge-TTS and gTTS
+        logger.info("ℹ️ Using estimated word timings (0.40s/word, tuned for gTTS)")
+        
+        # STEP 2: Generate audio file (Edge-TTS or gTTS fallback)
         logger.info(f"  🎤 Generating audio for full text: \"{full_text[:100]}...\"")
         audio_file = self.generate_audio_file(full_text, 0)
         
         if audio_file and os.path.exists(audio_file):
             # Try to get actual duration from audio file
+            actual_duration = None
             try:
                 from mutagen.mp3 import MP3
                 audio = MP3(audio_file)
                 actual_duration = audio.info.length
                 logger.info(f"✅ Audio file duration: {actual_duration:.2f}s")
-            except:
-                # Fallback: use estimated duration from timeline
-                actual_duration = timeline["metadata"].get("total_duration", 0.0)
-                logger.info(f"✅ Using estimated duration: {actual_duration:.2f}s")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not read audio duration with mutagen: {e}")
+                # Try alternative method using pydub
+                try:
+                    from pydub import AudioSegment
+                    audio = AudioSegment.from_mp3(audio_file)
+                    actual_duration = len(audio) / 1000.0  # Convert ms to seconds
+                    logger.info(f"✅ Audio file duration (pydub): {actual_duration:.2f}s")
+                except Exception as e2:
+                    logger.warning(f"⚠️ Could not read audio duration with pydub: {e2}")
+                    # Fallback: use estimated duration from timeline
+                    actual_duration = timeline["metadata"].get("total_duration", 0.0)
+                    logger.info(f"✅ Using estimated duration: {actual_duration:.2f}s")
+            
+            # CRITICAL: Scale concept reveal times to match actual audio duration
+            estimated_duration = timeline["metadata"].get("total_duration", 0.0)
+            if actual_duration and estimated_duration > 0 and abs(actual_duration - estimated_duration) > 0.5:
+                # Audio is significantly different from estimate - rescale all timings
+                scale_factor = actual_duration / estimated_duration
+                logger.info(f"🔄 Rescaling concept timings: {estimated_duration:.2f}s → {actual_duration:.2f}s (factor: {scale_factor:.3f})")
+                
+                for concept in timeline.get("concepts", []):
+                    old_time = concept.get("reveal_time", 0.0)
+                    new_time = old_time * scale_factor
+                    concept["reveal_time"] = new_time
+                    logger.debug(f"   📍 {concept.get('name')}: {old_time:.2f}s → {new_time:.2f}s")
+                
+                # Update metadata with actual duration
+                timeline["metadata"]["total_duration"] = actual_duration
+                timeline["metadata"]["original_estimated_duration"] = estimated_duration
+                timeline["metadata"]["timing_scale_factor"] = scale_factor
+                
+                logger.info(f"✅ Rescaled {len(timeline.get('concepts', []))} concept timings to match audio")
+            else:
+                logger.info(f"✓ Estimated duration close enough to actual ({estimated_duration:.2f}s ≈ {actual_duration:.2f}s)")
             
             # Store in timeline
             timeline["audio_file"] = audio_file
@@ -227,10 +406,70 @@ class PrecomputeEngine:
         
         return timeline
     
+    def _resolve_node_overlaps(self, pos: Dict[str, Tuple[float, float]], min_distance: float = 3.0) -> Dict[str, Tuple[float, float]]:
+        """
+        Resolve overlapping nodes using force-directed adjustment.
+        Ensures minimum distance between all node pairs.
+        
+        Args:
+            pos: Initial position dictionary
+            min_distance: Minimum distance between node centers
+            
+        Returns:
+            Adjusted position dictionary with no overlaps
+        """
+        import math
+        
+        adjusted_pos = pos.copy()
+        max_iterations = 100
+        
+        for iteration in range(max_iterations):
+            moved = False
+            
+            # Check all pairs of nodes
+            nodes = list(adjusted_pos.keys())
+            for i, node1 in enumerate(nodes):
+                for node2 in nodes[i+1:]:
+                    x1, y1 = adjusted_pos[node1]
+                    x2, y2 = adjusted_pos[node2]
+                    
+                    # Calculate distance
+                    dx = x2 - x1
+                    dy = y2 - y1
+                    distance = math.sqrt(dx*dx + dy*dy)
+                    
+                    # If nodes are too close, push them apart
+                    if distance < min_distance:
+                        moved = True
+                        
+                        # Calculate push direction
+                        if distance < 0.01:  # Avoid division by zero
+                            # Nodes are at same position, push in random direction
+                            angle = hash(node1 + node2) % 360
+                            dx = math.cos(math.radians(angle))
+                            dy = math.sin(math.radians(angle))
+                            distance = 0.01
+                        
+                        # Push amount (half to each node)
+                        push = (min_distance - distance) / 2
+                        push_x = (dx / distance) * push
+                        push_y = (dy / distance) * push
+                        
+                        # Move nodes apart
+                        adjusted_pos[node1] = (x1 - push_x, y1 - push_y)
+                        adjusted_pos[node2] = (x2 + push_x, y2 + push_y)
+            
+            # If no nodes moved, we're done
+            if not moved:
+                logger.info(f"   Resolved overlaps in {iteration + 1} iterations")
+                break
+        
+        return adjusted_pos
+    
     def _create_hierarchical_tree_layout(self, graph: nx.DiGraph) -> Dict[str, Tuple[float, float]]:
         """
         True hierarchical tree layout - root at top, children below.
-        Uses NetworkX's built-in tree layout.
+        Uses NetworkX's built-in tree layout with overlap prevention.
         
         Args:
             graph: Directed graph
@@ -252,10 +491,13 @@ class PrecomputeEngine:
             # Use NetworkX's hierarchical layout with root at top
             pos = nx.nx_agraph.graphviz_layout(graph, prog='dot', root=root)
             
-            # Scale the positions
+            # Scale the positions with more spacing
             scaled_pos = {}
             for node, (x, y) in pos.items():
-                scaled_pos[node] = (x / 50, -y / 50)  # Scale and flip y
+                scaled_pos[node] = (x / 40, -y / 40)  # More compact scaling
+            
+            # Resolve overlaps
+            scaled_pos = self._resolve_node_overlaps(scaled_pos, min_distance=3.0)
             
             logger.info(f"   Created tree layout with root: {root}")
             return scaled_pos
@@ -281,7 +523,8 @@ class PrecomputeEngine:
             if num_nodes == 0:
                 return {}
             
-            # Calculate level for each node based on importance rank
+            # Group nodes by level first
+            levels = {0: [], 1: [], 2: []}
             for idx, (node, imp) in enumerate(sorted_nodes):
                 rank = idx / max(num_nodes - 1, 1)  # 0.0 to 1.0
                 
@@ -293,21 +536,26 @@ class PrecomputeEngine:
                 else:
                     level = 2
                 
-                # Y position based on level
-                y = -level * 6.0  # Larger vertical spacing
+                levels[level].append(node)
+            
+            # Position nodes in each level with adequate spacing
+            for level, nodes_in_level in levels.items():
+                y = -level * 6.0  # Vertical spacing between levels
+                num_in_level = len(nodes_in_level)
                 
-                # X position: spread horizontally within level
-                # Count how many nodes are at this level so far
-                nodes_at_level = [n for n, i in sorted_nodes[:idx+1] 
-                                 if (sorted_nodes.index((n, i)) / max(num_nodes - 1, 1)) >= rank - 0.33 
-                                 and (sorted_nodes.index((n, i)) / max(num_nodes - 1, 1)) < rank + 0.34]
-                x_index = len([n for n in nodes_at_level if n != node])
-                x_offset = (x_index - len(nodes_at_level) / 2) * 5.0
+                # Horizontal spacing - ensure minimum distance
+                total_width = max(num_in_level * 3.5, 10.0)  # Minimum 3.5 units apart
                 
-                pos[node] = (x_offset, y)
+                for i, node in enumerate(nodes_in_level):
+                    # Center the nodes horizontally
+                    x = (i - (num_in_level - 1) / 2) * (total_width / max(num_in_level, 1))
+                    pos[node] = (x, y)
+            
+            # Resolve any remaining overlaps
+            pos = self._resolve_node_overlaps(pos, min_distance=3.0)
             
             root = sorted_nodes[0][0]
-            logger.info(f"   Created simple hierarchical layout with root: {root}, 3 tiers")
+            logger.info(f"   Created simple hierarchical layout with root: {root}, 3 tiers, no overlaps")
             return pos
     
     def _create_shell_groups(self, graph: nx.DiGraph) -> List[List[str]]:

@@ -162,12 +162,11 @@ def render_graph(G, pos, visible_nodes, new_nodes, alpha_map, scale_map, show_ed
         ax.scatter([x], [y], s=node_size, c=[color], 
                   edgecolors=edge_color, linewidth=edge_width, zorder=2)
         
-        # Draw label BELOW the node (not inside) to avoid overlap
+        # Draw label INSIDE the node (centered)
         # Label is ALWAYS fully visible (alpha=1.0) even when node is fading in
-        label_y = y - 0.8  # Position text below the node
-        ax.text(x, label_y, node, fontsize=10, fontweight='bold',
-               ha='center', va='top', color='#2c3e50', alpha=1.0, zorder=4,
-               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=1.0, edgecolor='none'))
+        ax.text(x, y, node, fontsize=9, fontweight='bold',
+               ha='center', va='center', color='white', alpha=1.0, zorder=4,
+               bbox=dict(boxstyle='round,pad=0.3', facecolor=(0, 0, 0, 0.3), alpha=0.7, edgecolor='none'))
     
     # Draw edge labels (relationship names) if enabled
     if show_edge_labels and visible_edges:
@@ -577,27 +576,53 @@ def run_dynamic_visualization(timeline, layout_style="hierarchical", show_edge_l
             
             st.info("⏳ **Playing...** Watch as concepts appear synchronized with the narration!")
             
-            # Debug logging
+            # Debug logging with timing information
             logger.info(f"🚀 VISUALIZATION STARTED")
             logger.info(f"   Total concepts: {len(concepts)}")
             logger.info(f"   Total duration: {total_duration:.2f}s")
             logger.info(f"   Graph has {len(G.nodes())} nodes, {len(pos)} positions")
             
+            # Log concept timings for debugging
+            if timeline.get("metadata", {}).get("timing_scale_factor"):
+                scale_factor = timeline["metadata"]["timing_scale_factor"]
+                orig_duration = timeline["metadata"].get("original_estimated_duration", 0)
+                logger.info(f"   ⚖️ Timings rescaled: {orig_duration:.2f}s → {total_duration:.2f}s (factor: {scale_factor:.3f})")
+            
+            logger.info("   📍 Concept reveal schedule:")
+            for i, concept in enumerate(concepts[:10]):  # Show first 10
+                reveal_time = concept.get('reveal_time', 0.0)
+                name = concept.get('name', 'Unknown')
+                logger.info(f"      {i+1}. '{name}' at {reveal_time:.2f}s")
+            if len(concepts) > 10:
+                logger.info(f"      ... and {len(concepts) - 10} more concepts")
+            
             # Progressive reveal over duration
             visible_nodes = set()
             recently_revealed = {}  # Track when each node was revealed {node: reveal_time}
             highlight_duration = 1.5  # Keep nodes orange for 1.5 seconds after reveal
-            num_steps = min(len(concepts) * 3, 50)  # 3 steps per concept, max 50
-            time_per_step = total_duration / num_steps if num_steps > 0 else 0.5
             
-            logger.info(f"   Will reveal over {num_steps} steps, {time_per_step:.2f}s per step")
+            # Calculate frames per second for smooth animation (targeting 10 FPS)
+            fps = 10  # frames per second
+            frame_duration = 1.0 / fps  # seconds per frame
+            total_frames = int(total_duration * fps)  # total number of frames
             
-            for step in range(num_steps + 1):
-                elapsed = (step / num_steps) * total_duration if num_steps > 0 else 0
+            logger.info(f"   Will reveal over {total_frames} frames at {fps} FPS ({frame_duration:.3f}s per frame)")
+            
+            # Start timing for real-time synchronization
+            start_time = time.time()
+            
+            for frame in range(total_frames + 1):
+                # Calculate elapsed time based on actual clock time (not frame count)
+                # This ensures we stay synchronized with audio even if rendering is slow
+                elapsed = time.time() - start_time
+                
+                # Safety check: don't exceed total duration
+                if elapsed > total_duration:
+                    elapsed = total_duration
                 
                 # Update progress
                 with progress_placeholder:
-                    progress = step / num_steps if num_steps > 0 else 1.0
+                    progress = elapsed / total_duration if total_duration > 0 else 1.0
                     st.progress(progress, text=f"Progress: {int(progress * 100)}%")
                 
                 # Update timer
@@ -633,9 +658,16 @@ def run_dynamic_visualization(timeline, layout_style="hierarchical", show_edge_l
                     else:
                         st.info(f"💡 **Waiting for first concept...**")
                 
-                # Wait before next step
-                if step < num_steps:
-                    time.sleep(time_per_step)
+                # Sleep until next frame time (to maintain consistent FPS)
+                next_frame_time = start_time + (frame + 1) * frame_duration
+                sleep_time = next_frame_time - time.time()
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                
+                # Stop if we've reached or exceeded the total duration
+                if elapsed >= total_duration:
+                    logger.info(f"   ⏹️ Reached total duration: {elapsed:.2f}s")
+                    break
             
             # Mark as completed
             st.session_state.viz_completed = True
