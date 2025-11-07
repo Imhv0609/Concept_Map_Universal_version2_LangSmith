@@ -406,14 +406,14 @@ class PrecomputeEngine:
         
         return timeline
     
-    def _resolve_node_overlaps(self, pos: Dict[str, Tuple[float, float]], min_distance: float = 3.0) -> Dict[str, Tuple[float, float]]:
+    def _resolve_node_overlaps(self, pos: Dict[str, Tuple[float, float]], min_distance: float = 5.0) -> Dict[str, Tuple[float, float]]:
         """
         Resolve overlapping nodes using force-directed adjustment.
         Ensures minimum distance between all node pairs.
         
         Args:
             pos: Initial position dictionary
-            min_distance: Minimum distance between node centers
+            min_distance: Minimum distance between node centers (default 5.0 to prevent overlap with node size ~3000)
             
         Returns:
             Adjusted position dictionary with no overlaps
@@ -421,7 +421,7 @@ class PrecomputeEngine:
         import math
         
         adjusted_pos = pos.copy()
-        max_iterations = 100
+        max_iterations = 200  # Increased for better convergence
         
         for iteration in range(max_iterations):
             moved = False
@@ -496,8 +496,8 @@ class PrecomputeEngine:
             for node, (x, y) in pos.items():
                 scaled_pos[node] = (x / 40, -y / 40)  # More compact scaling
             
-            # Resolve overlaps
-            scaled_pos = self._resolve_node_overlaps(scaled_pos, min_distance=3.0)
+            # Resolve overlaps with sufficient spacing for node size 3000
+            scaled_pos = self._resolve_node_overlaps(scaled_pos, min_distance=5.0)
             
             logger.info(f"   Created tree layout with root: {root}")
             return scaled_pos
@@ -540,19 +540,19 @@ class PrecomputeEngine:
             
             # Position nodes in each level with adequate spacing
             for level, nodes_in_level in levels.items():
-                y = -level * 6.0  # Vertical spacing between levels
+                y = -level * 7.0  # Increased vertical spacing between levels (was 6.0)
                 num_in_level = len(nodes_in_level)
                 
-                # Horizontal spacing - ensure minimum distance
-                total_width = max(num_in_level * 3.5, 10.0)  # Minimum 3.5 units apart
+                # Horizontal spacing - ensure minimum distance to prevent overlap with node size 3000
+                total_width = max(num_in_level * 5.5, 12.0)  # Increased minimum spacing (was 3.5)
                 
                 for i, node in enumerate(nodes_in_level):
                     # Center the nodes horizontally
                     x = (i - (num_in_level - 1) / 2) * (total_width / max(num_in_level, 1))
                     pos[node] = (x, y)
             
-            # Resolve any remaining overlaps
-            pos = self._resolve_node_overlaps(pos, min_distance=3.0)
+            # Resolve any remaining overlaps with sufficient spacing for node size 3000
+            pos = self._resolve_node_overlaps(pos, min_distance=5.0)
             
             root = sorted_nodes[0][0]
             logger.info(f"   Created simple hierarchical layout with root: {root}, 3 tiers, no overlaps")
