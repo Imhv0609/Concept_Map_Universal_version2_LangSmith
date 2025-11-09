@@ -513,38 +513,58 @@ class PrecomputeEngine:
             # Sort by importance
             sorted_nodes = sorted(importance.items(), key=lambda x: x[1], reverse=True)
             
-            # Assign to levels based on importance tiers
-            # Most important = Level 0 (top)
-            # Medium importance = Level 1 (middle)
-            # Least important = Level 2 (bottom)
+            # Assign to levels based on importance tiers - 5 LEVEL BALANCED HIERARCHY
+            # Level 0 (top): Most important - Root concept (target: 1 node)
+            # Level 1: Key concepts (target: 2-4 nodes)
+            # Level 2: Supporting concepts (target: 3-5 nodes)
+            # Level 3: Detail concepts (target: 3-6 nodes)
+            # Level 4 (bottom): Example/edge concepts (target: 0-4 nodes)
             pos = {}
             num_nodes = len(sorted_nodes)
             
             if num_nodes == 0:
                 return {}
             
-            # Group nodes by level first
-            levels = {0: [], 1: [], 2: []}
+            # Group nodes by level first - 5 levels for child-friendly hierarchy
+            levels = {0: [], 1: [], 2: [], 3: [], 4: []}
             for idx, (node, imp) in enumerate(sorted_nodes):
                 rank = idx / max(num_nodes - 1, 1)  # 0.0 to 1.0
                 
-                # Assign level: 0 (top), 1 (middle), 2 (bottom)
-                if rank < 0.33:
-                    level = 0
-                elif rank < 0.67:
-                    level = 1
+                # Assign level: percentage-based distribution (Option A)
+                if rank < 0.10:
+                    level = 0  # Top 10% - Root
+                elif rank < 0.30:
+                    level = 1  # Next 20% - Key concepts
+                elif rank < 0.55:
+                    level = 2  # Next 25% - Supporting
+                elif rank < 0.80:
+                    level = 3  # Next 25% - Details
                 else:
-                    level = 2
+                    level = 4  # Bottom 20% - Examples
                 
                 levels[level].append(node)
             
-            # Position nodes in each level with adequate spacing
+            # Dynamic vertical spacing based on total levels used
+            num_levels = 5
+            vertical_spacing = 35.0 / num_levels  # Total height ~35 units distributed across 5 levels
+            
+            # Position nodes in each level with per-level horizontal spacing
             for level, nodes_in_level in levels.items():
-                y = -level * 7.0  # Increased vertical spacing between levels (was 6.0)
+                y = -level * vertical_spacing  # Dynamic vertical spacing
                 num_in_level = len(nodes_in_level)
                 
-                # Horizontal spacing - ensure minimum distance to prevent overlap with node size 3000
-                total_width = max(num_in_level * 5.5, 12.0)  # Increased minimum spacing (was 3.5)
+                # Per-level horizontal spacing adjustment
+                # Top levels (0-1): More spread out for emphasis
+                # Middle levels (2-3): Moderate spacing
+                # Bottom level (4): Compact
+                if level <= 1:
+                    spacing_multiplier = 6.5  # More space for important nodes
+                elif level <= 3:
+                    spacing_multiplier = 5.5  # Standard spacing
+                else:
+                    spacing_multiplier = 4.5  # Compact for bottom level
+                
+                total_width = max(num_in_level * spacing_multiplier, 12.0)
                 
                 for i, node in enumerate(nodes_in_level):
                     # Center the nodes horizontally
@@ -555,7 +575,7 @@ class PrecomputeEngine:
             pos = self._resolve_node_overlaps(pos, min_distance=5.0)
             
             root = sorted_nodes[0][0]
-            logger.info(f"   Created simple hierarchical layout with root: {root}, 3 tiers, no overlaps")
+            logger.info(f"   Created 5-level hierarchical layout with root: {root}, child-friendly balanced design, no overlaps")
             return pos
     
     def _create_shell_groups(self, graph: nx.DiGraph) -> List[List[str]]:
