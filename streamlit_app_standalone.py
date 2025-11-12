@@ -2,7 +2,9 @@
 Standalone Streamlit App for Dynamic Concept Maps
 ==================================================
 Single-page app where you can input a description and see the dynamic concept map.
-Version: 2.0 - Continuous Timeline Mode with instant node/label appearance
+Version: 3.0 - Smart Grid Layout + Reduced Nodes + Edge Constraints
+Features: 3x3 grid, halved node count, max 2 incoming edges, 1/3rd label positioning
+Last Updated: 2025-11-12 - Force Streamlit Cloud rebuild
 """
 
 import streamlit as st
