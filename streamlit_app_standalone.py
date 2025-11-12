@@ -185,9 +185,10 @@ def render_graph(G, pos, visible_nodes, new_nodes, alpha_map, scale_map, show_ed
                 x1, y1 = pos[u]
                 x2, y2 = pos[v]
                 
-                # Position label at midpoint (edges are straighter now)
-                label_x = (x1 + x2) / 2
-                label_y = (y1 + y2) / 2
+                # Position label at 1/3rd of the distance from source to avoid overlapping
+                # This places the label closer to the source node
+                label_x = x1 + (x2 - x1) / 3.0  # 1/3rd from source (x1)
+                label_y = y1 + (y2 - y1) / 3.0  # 1/3rd from source (y1)
                 
                 # Add text with minimal background - larger font, tighter padding
                 ax.text(

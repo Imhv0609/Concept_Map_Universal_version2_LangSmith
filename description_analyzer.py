@@ -34,10 +34,10 @@ def analyze_description_complexity(description: str) -> Dict[str, Any]:
     sentence_count = len([s for s in sentences if s.strip()])
     avg_words_per_sentence = word_count / max(sentence_count, 1)
     
-    # Logarithmic scaling for concept map complexity
+    # Logarithmic scaling for concept map complexity - REDUCED TO HALF
     if word_count <= 5:  # Single word to short phrase
         complexity = {
-            "target_concepts": 3,
+            "target_concepts": 2,  # Reduced from 3 to 2 (minimum for visualization)
             "target_subtopics": 1,
             "detail_level": "basic",
             "connection_density": "low",
@@ -45,45 +45,45 @@ def analyze_description_complexity(description: str) -> Dict[str, Any]:
         }
     elif word_count <= 20:  # Very short description (one sentence)
         # More conservative scaling for very short text
-        base_concepts = 3 + math.log2(word_count) * 0.8
+        base_concepts = 1.5 + math.log2(word_count) * 0.4  # Halved: 3→1.5, 0.8→0.4
         complexity = {
-            "target_concepts": int(min(base_concepts, 5)),  # Cap at 5 for very short
+            "target_concepts": int(max(2, min(base_concepts, 3))),  # Cap reduced from 5 to 3 (min 2)
             "target_subtopics": 1,
             "detail_level": "basic",
             "connection_density": "low",
             "educational_depth": "basic"
         }
     elif word_count <= 50:  # Short description (1-2 sentences)
-        base_concepts = 4 + math.log2(word_count) * 1.2
+        base_concepts = 2 + math.log2(word_count) * 0.6  # Halved: 4→2, 1.2→0.6
         complexity = {
-            "target_concepts": int(min(base_concepts, 8)),
+            "target_concepts": int(max(2, min(base_concepts, 4))),  # Cap reduced from 8 to 4 (min 2)
             "target_subtopics": 2,
             "detail_level": "moderate",
             "connection_density": "medium",
             "educational_depth": "basic"
         }
     elif word_count <= 200:  # Medium description (paragraph)
-        base_concepts = 6 + math.log10(word_count) * 4
+        base_concepts = 3 + math.log10(word_count) * 2  # Halved: 6→3, 4→2
         complexity = {
-            "target_concepts": int(min(base_concepts, 15)),
+            "target_concepts": int(max(2, min(base_concepts, 8))),  # Cap reduced from 15 to 8 (min 2)
             "target_subtopics": 3,
             "detail_level": "detailed",
             "connection_density": "high",
             "educational_depth": "comprehensive"
         }
     elif word_count <= 1000:  # Long description (multiple paragraphs)
-        base_concepts = 10 + math.log10(word_count) * 3.5
+        base_concepts = 5 + math.log10(word_count) * 1.75  # Halved: 10→5, 3.5→1.75
         complexity = {
-            "target_concepts": int(min(base_concepts, 20)),
+            "target_concepts": int(max(2, min(base_concepts, 10))),  # Cap reduced from 20 to 10 (min 2)
             "target_subtopics": 4,
             "detail_level": "comprehensive",
             "connection_density": "very_high",
             "educational_depth": "advanced"
         }
     else:  # Very long description (academic/research level)
-        base_concepts = 15 + math.log10(word_count) * 2.5
+        base_concepts = 7.5 + math.log10(word_count) * 1.25  # Halved: 15→7.5, 2.5→1.25
         complexity = {
-            "target_concepts": int(min(base_concepts, 25)),  # Hard cap at 25
+            "target_concepts": int(max(2, min(base_concepts, 13))),  # Cap reduced from 25 to 13 (min 2)
             "target_subtopics": 5,
             "detail_level": "expert",
             "connection_density": "maximum",

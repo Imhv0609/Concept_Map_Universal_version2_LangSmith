@@ -480,103 +480,54 @@ class PrecomputeEngine:
         if len(graph.nodes) == 0:
             return {}
         
-        try:
-            # Find the root node (most connected)
-            importance = {}
-            for node in graph.nodes:
-                importance[node] = graph.out_degree(node) + graph.in_degree(node)
+        # SMART GRID LAYOUT (Always used - replaces Graphviz)
+        # Find the root node (most connected)
+        importance = {}
+        for node in graph.nodes:
+            importance[node] = graph.out_degree(node) + graph.in_degree(node)
+        
+        # Sort by importance
+        sorted_nodes = sorted(importance.items(), key=lambda x: x[1], reverse=True)
+        
+        pos = {}
+        num_nodes = len(sorted_nodes)
+        
+        if num_nodes == 0:
+            return {}
+        
+        # SMART GRID LAYOUT
+        # Root node at top center (position 0, 0)
+        root_node = sorted_nodes[0][0]
+        pos[root_node] = (0.0, 0.0)
+        
+        # Grid parameters
+        grid_columns = 3  # Fixed 3 columns
+        horizontal_spacing = 8.0  # Fixed spacing between columns
+        vertical_spacing = 7.0  # Row height (same as before)
+        
+        # Arrange remaining nodes in 3-column grid below root
+        remaining_nodes = [node for node, imp in sorted_nodes[1:]]  # Exclude root
+        
+        for idx, node in enumerate(remaining_nodes):
+            # Calculate grid position (row, column)
+            row = idx // grid_columns  # Integer division for row
+            col = idx % grid_columns   # Modulo for column (0, 1, 2)
             
-            root = max(importance.items(), key=lambda x: x[1])[0]
+            # Calculate actual (x, y) coordinates
+            # X: Center the grid, columns at -8, 0, +8
+            x = (col - 1) * horizontal_spacing  # col 0→-8, col 1→0, col 2→+8
             
-            # Use NetworkX's hierarchical layout with root at top
-            pos = nx.nx_agraph.graphviz_layout(graph, prog='dot', root=root)
+            # Y: Start first row at -7, then -14, -21, etc.
+            y = -(row + 1) * vertical_spacing
             
-            # Scale the positions with more spacing
-            scaled_pos = {}
-            for node, (x, y) in pos.items():
-                scaled_pos[node] = (x / 40, -y / 40)  # More compact scaling
-            
-            # Resolve overlaps with sufficient spacing for node size 3000
-            scaled_pos = self._resolve_node_overlaps(scaled_pos, min_distance=5.0)
-            
-            logger.info(f"   Created tree layout with root: {root}")
-            return scaled_pos
-            
-        except Exception as e:
-            logger.warning(f"   graphviz not available, using manual tree layout: {e}")
-            
-            # Fallback: Simple hierarchical based on importance only
-            importance = {}
-            for node in graph.nodes:
-                importance[node] = graph.out_degree(node) + graph.in_degree(node)
-            
-            # Sort by importance
-            sorted_nodes = sorted(importance.items(), key=lambda x: x[1], reverse=True)
-            
-            # Assign to levels based on importance tiers - 5 LEVEL BALANCED HIERARCHY
-            # Level 0 (top): Most important - Root concept (target: 1 node)
-            # Level 1: Key concepts (target: 2-4 nodes)
-            # Level 2: Supporting concepts (target: 3-5 nodes)
-            # Level 3: Detail concepts (target: 3-6 nodes)
-            # Level 4 (bottom): Example/edge concepts (target: 0-4 nodes)
-            pos = {}
-            num_nodes = len(sorted_nodes)
-            
-            if num_nodes == 0:
-                return {}
-            
-            # Group nodes by level first - 5 levels for child-friendly hierarchy
-            levels = {0: [], 1: [], 2: [], 3: [], 4: []}
-            for idx, (node, imp) in enumerate(sorted_nodes):
-                rank = idx / max(num_nodes - 1, 1)  # 0.0 to 1.0
-                
-                # Assign level: percentage-based distribution (Option A)
-                if rank < 0.10:
-                    level = 0  # Top 10% - Root
-                elif rank < 0.30:
-                    level = 1  # Next 20% - Key concepts
-                elif rank < 0.55:
-                    level = 2  # Next 25% - Supporting
-                elif rank < 0.80:
-                    level = 3  # Next 25% - Details
-                else:
-                    level = 4  # Bottom 20% - Examples
-                
-                levels[level].append(node)
-            
-            # Dynamic vertical spacing based on total levels used
-            num_levels = 5
-            vertical_spacing = 35.0 / num_levels  # Total height ~35 units distributed across 5 levels
-            
-            # Position nodes in each level with per-level horizontal spacing
-            for level, nodes_in_level in levels.items():
-                y = -level * vertical_spacing  # Dynamic vertical spacing
-                num_in_level = len(nodes_in_level)
-                
-                # Per-level horizontal spacing adjustment
-                # Top levels (0-1): More spread out for emphasis
-                # Middle levels (2-3): Moderate spacing
-                # Bottom level (4): Compact
-                if level <= 1:
-                    spacing_multiplier = 6.5  # More space for important nodes
-                elif level <= 3:
-                    spacing_multiplier = 5.5  # Standard spacing
-                else:
-                    spacing_multiplier = 4.5  # Compact for bottom level
-                
-                total_width = max(num_in_level * spacing_multiplier, 12.0)
-                
-                for i, node in enumerate(nodes_in_level):
-                    # Center the nodes horizontally
-                    x = (i - (num_in_level - 1) / 2) * (total_width / max(num_in_level, 1))
-                    pos[node] = (x, y)
-            
-            # Resolve any remaining overlaps with sufficient spacing for node size 3000
-            pos = self._resolve_node_overlaps(pos, min_distance=5.0)
-            
-            root = sorted_nodes[0][0]
-            logger.info(f"   Created 5-level hierarchical layout with root: {root}, child-friendly balanced design, no overlaps")
-            return pos
+            pos[node] = (x, y)
+        
+        # Resolve any remaining overlaps with sufficient spacing for node size 3000
+        pos = self._resolve_node_overlaps(pos, min_distance=5.0)
+        
+        num_rows = (len(remaining_nodes) + grid_columns - 1) // grid_columns  # Ceiling division
+        logger.info(f"   Created smart grid layout: root + {len(remaining_nodes)} nodes in {num_rows} rows × {grid_columns} columns")
+        return pos
     
     def _create_shell_groups(self, graph: nx.DiGraph) -> List[List[str]]:
         """
@@ -623,6 +574,70 @@ class PrecomputeEngine:
             logger.debug(f"Failed to create shell groups: {e}")
             return []
     
+    def _filter_edges_by_incoming_limit(self, graph: nx.DiGraph, max_incoming: int = 2) -> nx.DiGraph:
+        """
+        Limit incoming edges per node to create cleaner hierarchy.
+        Root node gets 0 incoming edges, all others get max 2.
+        Prioritizes edges from more important (higher degree) source nodes.
+        
+        Args:
+            graph: Directed graph
+            max_incoming: Maximum incoming edges per non-root node (default: 2)
+            
+        Returns:
+            Filtered graph with edge constraints applied
+        """
+        # Find root node (highest importance = out_degree + in_degree)
+        if len(graph.nodes()) == 0:
+            return graph
+        
+        importance = {}
+        for node in graph.nodes():
+            importance[node] = graph.out_degree(node) + graph.in_degree(node)
+        
+        root_node = max(importance.items(), key=lambda x: x[1])[0]
+        logger.info(f"   Identified root node: '{root_node}' (importance: {importance[root_node]})")
+        
+        # Remove ALL incoming edges to root node
+        incoming_to_root = list(graph.in_edges(root_node))
+        for source, target in incoming_to_root:
+            graph.remove_edge(source, target)
+        
+        if incoming_to_root:
+            logger.info(f"   Removed {len(incoming_to_root)} incoming edges from root node")
+        
+        # For all other nodes, limit to max_incoming edges (prioritize by source importance)
+        edges_removed_count = 0
+        for node in graph.nodes():
+            if node == root_node:
+                continue  # Skip root, already handled
+            
+            incoming_edges = list(graph.in_edges(node))
+            
+            if len(incoming_edges) > max_incoming:
+                # Calculate importance of each incoming edge based on source node
+                edge_importance = []
+                for source, target in incoming_edges:
+                    source_importance = importance.get(source, 0)
+                    edge_importance.append((source, target, source_importance))
+                
+                # Sort by source importance (descending) - keep most important sources
+                edge_importance.sort(key=lambda x: x[2], reverse=True)
+                
+                # Keep only top max_incoming edges
+                edges_to_keep = set((src, tgt) for src, tgt, imp in edge_importance[:max_incoming])
+                
+                # Remove excess edges
+                for source, target in incoming_edges:
+                    if (source, target) not in edges_to_keep:
+                        graph.remove_edge(source, target)
+                        edges_removed_count += 1
+        
+        if edges_removed_count > 0:
+            logger.info(f"   Removed {edges_removed_count} excess edges (max {max_incoming} incoming per node)")
+        
+        return graph
+    
     def calculate_hierarchical_layout(self, timeline: Dict, layout_style: str = None) -> Dict[str, Tuple[float, float]]:
         """
         Calculate clear, organized graph layout for concepts.
@@ -662,6 +677,10 @@ class PrecomputeEngine:
         
         logger.info(f"📐 Calculating '{layout_style}' graph layout...")
         logger.info(f"   Graph: {len(graph.nodes())} nodes, {len(graph.edges())} edges (added {edges_added})")
+        
+        # Apply edge constraints: max 2 incoming edges per node (0 for root)
+        graph = self._filter_edges_by_incoming_limit(graph, max_incoming=2)
+        logger.info(f"   After edge filtering: {len(graph.edges())} edges (limited to max 2 incoming per node)")
         
         if len(graph.edges()) == 0:
             logger.warning("⚠️ Graph has NO edges! Hierarchical layout will not work well. Check LLM relationship extraction!")
