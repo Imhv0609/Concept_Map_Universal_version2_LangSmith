@@ -410,7 +410,34 @@ def run_dynamic_visualization(timeline, layout_style="hierarchical", show_edge_l
         st.write(f"**Total Concepts:** {timeline['metadata'].get('total_concepts', 0)}")
         st.write(f"**Total Relationships:** {len(timeline.get('relationships', []))}")
         
+        # Show Node Timings Table
+        st.write("### 📊 Node Timings")
+        timing_data = []
+        for sentence in timeline.get("sentences", []):
+            for concept in sentence.get("concepts", []):
+                timing_data.append({
+                    "Node": concept.get("name", ""),
+                    "Reveal Time (s)": f"{concept.get('reveal_time', 0):.2f}",
+                    "Importance": concept.get("importance", 0)
+                })
+        if timing_data:
+            import pandas as pd
+            df = pd.DataFrame(timing_data)
+            st.dataframe(df, use_container_width=True)
+        
+        # Download Complete Timeline as JSON
+        st.write("### 💾 Download Timeline")
+        import json
+        timeline_json = json.dumps(timeline, indent=2)
+        st.download_button(
+            label="📥 Download Complete Timeline JSON",
+            data=timeline_json,
+            file_name=f"timeline_{timeline['metadata'].get('topic', 'concept_map')}.json",
+            mime="application/json"
+        )
+        
         # Check first sentence structure
+        st.write("### 🔍 First Sentence Structure")
         if timeline["sentences"]:
             first_sent = timeline["sentences"][0]
             st.write(f"**First Sentence Concepts:** {len(first_sent.get('concepts', []))}")
