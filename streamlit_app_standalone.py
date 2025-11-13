@@ -2,9 +2,9 @@
 Standalone Streamlit App for Dynamic Concept Maps
 ==================================================
 Single-page app where you can input a description and see the dynamic concept map.
-Version: 3.0 - Smart Grid Layout + Reduced Nodes + Edge Constraints
-Features: 3x3 grid, halved node count, max 2 incoming edges, 1/3rd label positioning
-Last Updated: 2025-11-12 - Force Streamlit Cloud rebuild
+Version: 3.1 - Smart Grid + JSON Download Button Always Visible
+Features: 3x3 grid, halved node count, max 2 incoming edges, prominent download button
+Last Updated: 2025-11-13 - Added always-visible JSON download button
 """
 
 import streamlit as st
@@ -401,6 +401,19 @@ def run_dynamic_visualization(timeline, layout_style="hierarchical", show_edge_l
     """
     st.markdown("---")
     st.markdown("### 🎬 Dynamic Concept Map (Keyword-Timed)")
+    
+    # Always-visible Download Button
+    import json
+    timeline_json = json.dumps(timeline, indent=2)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.download_button(
+            label="📥 Download Timeline JSON with Node Timings",
+            data=timeline_json,
+            file_name=f"timeline_{timeline['metadata'].get('topic', 'concept_map')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
     
     # Debug: Show timeline structure
     with st.expander("🔍 Debug Info (Click to expand)", expanded=False):
